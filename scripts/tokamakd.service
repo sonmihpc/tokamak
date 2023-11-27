@@ -1,0 +1,14 @@
+[Unit]
+Description=Tokamakd
+StartLimitIntervalSec=20
+
+[Service]
+Type=notify
+ExecStart=/usr/sbin/tokamakd -c /etc/tokamak/config.yaml
+Restart=on-failure
+KillMode=process
+Restart=always
+RestartSec=20
+
+[Install]
+WantedBy=multi-user.target
