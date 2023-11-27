@@ -3,6 +3,13 @@ version := $(shell echo $(VERSION) |grep -Eo '[0-9]+\.[0-9]+\.[0-9]')
 
 run:
 	go run main.go -c configs/config.yaml
+build:
+	go build -o tokamakd main.go
+install:
+	mkdir /etc/tokamak
+	cp -r configs/config.yaml /etc/tokamak/
+	cp -r scripts/tokamakd.service /usr/lib/systemd/system/
+	systemctl start tokamakd && systemctl enable tokamakd
 tokamak:
 	rm -rf ~/rpmbuild/SOURCES/tokamakd-$(version)*
 	rm -f ~/rpmbuild/SPECS/tokamakd.spec
