@@ -2,19 +2,20 @@ VERSION := $(shell git describe --tags --always --match='v*')
 version := $(shell echo $(VERSION) |grep -Eo '[0-9]+\.[0-9]+\.[0-9]')
 
 run:
-	go run main.go -c configs/config.yaml
+	go run cmd/tokamakd/main.go -c configs/config.yaml
 build:
-	go build -o tokamakd main.go
+	mkdir build && go build -o build/tokamakd cmd/tokamakd/main.go
 install:
 	mkdir /etc/tokamak
+	cp -r build/tokamakd /usr/sbin/
 	cp -r configs/config.yaml /etc/tokamak/
 	cp -r scripts/tokamakd.service /usr/lib/systemd/system/
 	systemctl start tokamakd && systemctl enable tokamakd
-tokamak:
+rpm:
 	rm -rf ~/rpmbuild/SOURCES/tokamakd-$(version)*
 	rm -f ~/rpmbuild/SPECS/tokamakd.spec
 	mkdir -p ~/rpmbuild/SOURCES/tokamakd-$(version)
-	go build -o  ~/rpmbuild/SOURCES/tokamakd-$(version)/tokamakd main.go
+	go build -o  ~/rpmbuild/SOURCES/tokamakd-$(version)/tokamakd cmd/tokamakd/main.go
 	cp -r scripts/tokamakd.service ~/rpmbuild/SOURCES/tokamakd-$(version)/
 	cp -r configs/config.yaml ~/rpmbuild/SOURCES/tokamakd-$(version)/
 	cd ~/rpmbuild/SOURCES;tar -cvzf tokamakd-$(version).tar.gz tokamakd-$(version)/;rm -rf tokamakd-$(version)/
