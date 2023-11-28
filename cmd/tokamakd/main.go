@@ -2,6 +2,7 @@
 package main
 
 import (
+	"fmt"
 	"github.com/coreos/go-systemd/daemon"
 	"github.com/sonmihpc/tokamak/internal/config"
 	"github.com/sonmihpc/tokamak/internal/inspector"
@@ -16,6 +17,10 @@ func main() {
 	cfg := config.Viper()
 	// create inspector instance from config
 	spector := inspector.NewInspector(cfg)
+	if spector == nil {
+		fmt.Println("fail to create inspector, exit.")
+		return
+	}
 	go spector.CheckInBackground()
 	// daemon
 	if _, err := daemon.SdNotify(false, "READY=1"); err != nil {
