@@ -11,6 +11,11 @@ install:
 	cp -r configs/config.yaml /etc/tokamak/
 	cp -r scripts/tokamakd.service /usr/lib/systemd/system/
 	systemctl start tokamakd && systemctl enable tokamakd
+uninstall:
+	systemctl stop tokamakd && systemctl disable tokamakd
+	rm -f /usr/sbin/tokamakd
+	rm -rf /etc/tokamak
+	rm -f /usr/lib/systemd/system/tokamakd.service
 rpm:
 	rm -rf ~/rpmbuild/SOURCES/tokamakd-$(version)*
 	rm -f ~/rpmbuild/SPECS/tokamakd.spec
