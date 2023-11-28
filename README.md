@@ -13,7 +13,7 @@ such as HPC cluster common login node, multi-users server.
 
 ## Installation
 
-You can download the rpm file and install it.
+You can download the rpm file and directly install it.
 
 ```bash
   rpm -ivh tokamakd-1.0.0-1.el9.x86_64.rpm
@@ -49,5 +49,5 @@ cgroup:
 
 ## Feedback
 
-If you have any feedback, please reach out to us at zcylove1995@gmail.com.
+If you have any feedback, please reach out to us at sonmihpc@gmail.com.
 
