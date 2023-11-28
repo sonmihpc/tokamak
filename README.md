@@ -1,7 +1,7 @@
 # Tokamak
 
-A simple tool to restrict the system users' resource such as CPU or memory by CGroup. It can be used in some situations 
-such as HPC cluster common login node, multi-users server.
+A straightforward tool that utilizes CGroup to regulate system users' resource usage, including CPU and memory. This 
+tool finds application in scenarios like shared HPC cluster login nodes and multi-user servers.
 
 
 ## Features
