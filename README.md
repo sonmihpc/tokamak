@@ -30,7 +30,7 @@ Or manually compile from the source file.
 
 ## Usage/Configure
 
-How to enable CGroup v1 in rocky linux 9?
+How to enable CGroup v1 in Rocky Linux 9?
 ```bash
   grubby --update-kernel=/boot/vmlinuz-$(uname -r) --args="systemd.unified_cgroup_hierarchy=0 systemd.legacy_systemd_cgroup_controller"
   grubby --update-kernel=ALL --args="systemd.unified_cgroup_hierarchy=0 systemd.legacy_systemd_cgroup_controller"
