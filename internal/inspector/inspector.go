@@ -2,168 +2,221 @@
 package inspector
 
 import (
-	"fmt"
-	"github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/shirou/gopsutil/v3/cpu"
 	"github.com/shirou/gopsutil/v3/mem"
 	"github.com/shirou/gopsutil/v3/process"
+	"github.com/sonmihpc/tokamak/internal/cgroup"
 	"github.com/sonmihpc/tokamak/internal/config"
-	"github.com/sonmihpc/tokamak/internal/controller"
 	"log"
+	"sync"
 	"time"
 )
 
 var PERIOD = uint64(100000)
 
-type Process struct {
-	Updated bool
-	Dirty   bool
-	Process *process.Process
-}
-
-type SysUserInfo struct {
-	Uid            int32
-	enable         bool
-	Processes      map[int32]*Process // index by pid
-	UserController *controller.UserController
-}
-
-func (s *SysUserInfo) beforeUpdate() {
-	for _, p := range s.Processes {
-		p.Updated = false
-	}
-}
-
-func (s *SysUserInfo) afterUpdate() {
-	for _, p := range s.Processes {
-		if p.Updated == false {
-			log.Printf("process had been removed: uid=%v pid=%v", s.Uid, p.Process.Pid)
-			delete(s.Processes, p.Process.Pid)
-		}
-	}
-}
-
 type Inspector struct {
-	Interval int // update interval
-	Users    map[int32]*SysUserInfo
-	Resource *specs.LinuxResources
+	Interval            int
+	Version             int
+	status              bool
+	closeCh             chan interface{}
+	UserProcessGroupMap map[int32]*UserProcessGroup
+	mapMu               sync.RWMutex
+	Resource            *cgroup.Resource
+	closeMu             sync.Mutex
+	excludeUids         []int32
 }
 
-func (s *Inspector) beforeUpdate() {
-	for _, u := range s.Users {
+func (i *Inspector) Push(uid int32, u *UserProcessGroup) {
+	i.mapMu.Lock()
+	defer i.mapMu.Unlock()
+	i.UserProcessGroupMap[uid] = u
+}
+
+func (i *Inspector) Delete(uid int32) {
+	i.mapMu.Lock()
+	defer i.mapMu.Unlock()
+	delete(i.UserProcessGroupMap, uid)
+}
+
+func (i *Inspector) Existed(uid int32) bool {
+	i.mapMu.RLock()
+	defer i.mapMu.RUnlock()
+	_, existed := i.UserProcessGroupMap[uid]
+	return existed
+}
+
+func (i *Inspector) GetUserProcessGroup(uid int32) *UserProcessGroup {
+	i.mapMu.RLock()
+	defer i.mapMu.RUnlock()
+	return i.UserProcessGroupMap[uid]
+}
+
+func (i *Inspector) beforeUpdate() {
+	for _, u := range i.UserProcessGroupMap {
 		u.beforeUpdate()
 	}
 }
 
-func (s *Inspector) afterUpdate() {
-	for _, u := range s.Users {
+func (i *Inspector) afterUpdate() {
+	for _, u := range i.UserProcessGroupMap {
 		u.afterUpdate()
 	}
 }
 
-func (s *Inspector) update() {
-	s.beforeUpdate()
-	defer s.afterUpdate()
+func (i *Inspector) update() {
+	i.beforeUpdate()
+	defer i.afterUpdate()
 	processes, err := process.Processes()
 	if err != nil {
 		log.Println(err)
 		return
 	}
+	var wg sync.WaitGroup
+	wg.Add(len(processes))
 	for _, p := range processes {
-		uids, err := p.Uids()
-		if err != nil {
-			log.Println(err)
-			continue
-		}
-		uid := uids[0]
-		_, ok := s.Users[uid]
-		if !ok {
-			enabled := false
-			if uid >= 1000 {
-				enabled = true
-			}
-			var usrCtrl *controller.UserController
-			if enabled {
-				usrCtrl, err = controller.NewUserController(uid, s.Resource)
-				if err != nil {
-					log.Printf("fail to create new usercontroller for uid=%v\n", uid)
-					fmt.Println(err)
-					continue
-				}
-			}
-			s.Users[uid] = &SysUserInfo{
-				Uid:            uid,
-				enable:         enabled,
-				Processes:      make(map[int32]*Process),
-				UserController: usrCtrl,
-			}
-			log.Printf("create SysUserInfo: uid=%v\n", uid)
-		}
-		_, ok = s.Users[uid].Processes[p.Pid]
-		if !ok { // new process need update cgroup
-			s.Users[uid].Processes[p.Pid] = &Process{
-				Updated: true,
-				Dirty:   true,
-				Process: p,
-			}
-			if s.Users[uid].enable {
-				if err := s.Users[uid].UserController.AddProcess(int(p.Pid)); err != nil {
-					log.Printf("fail to add process %v to CGroup\n", p.Pid)
-				}
-				log.Printf("add process %v to CGroup\n", p.Pid)
-			}
-			log.Printf("create Process: uid=%v pid=%v\n", uid, p.Pid)
-			continue
-		}
-		// if process still running
-		s.Users[uid].Processes[p.Pid].Updated = true
-		s.Users[uid].Processes[p.Pid].Dirty = false
-		//log.Printf("update process: pid=%v\n", p.Pid)
+		go i.updateProcess(p, &wg)
 	}
+	wg.Wait()
 }
 
-func (s *Inspector) CheckInBackground() {
-	ticker := time.NewTicker(time.Duration(s.Interval) * time.Millisecond)
+func (i *Inspector) updateProcess(p *process.Process, wg *sync.WaitGroup) {
+	defer wg.Done()
+	uids, err := p.Uids()
+	if err != nil {
+		log.Println(err)
+		return
+	}
+	uid := uids[0]
+	if !i.Existed(uid) {
+		enabled := false
+		if uid >= 1000 && i.outOfExcludeUids(uid) {
+			enabled = true
+		}
+		var cg cgroup.CGroup
+		if enabled {
+			cg, err = cgroup.NewCGroup(uid, i.Resource, i.Version)
+			if err != nil {
+				log.Printf("fail to create new cg for uid=%v\n", uid)
+				log.Println(err)
+				return
+			}
+		}
+		i.Push(uid, &UserProcessGroup{
+			Uid:       uid,
+			enabled:   enabled,
+			Processes: make(map[int32]*Process),
+			CGroup:    cg,
+		})
+		//log.Printf("create user process group: uid=%v\n", uid)
+	}
+	upg := i.GetUserProcessGroup(uid)
+	if !upg.Existed(p.Pid) {
+		upg.Push(p.Pid, &Process{
+			Updated: true,
+			Dirty:   true,
+			Process: p,
+		})
+		if upg.enabled {
+			if err := upg.CGroup.AddProcess(uint64(p.Pid)); err != nil {
+				log.Println(err)
+				log.Printf("fail to add process %v to CGroup\n", p.Pid)
+			}
+			//log.Printf("add process %v to CGroup\n", p.Pid)
+		}
+		//log.Printf("create process: uid=%v pid=%v\n", uid, p.Pid)
+		return
+	}
+	upg.SetUpdated(p.Pid, true)
+	upg.SetDirty(p.Pid, false)
+	//log.Printf("update process: pid=%v\n", p.Pid)
+}
+
+func (i *Inspector) RunInBackground() {
+	ticker := time.NewTicker(time.Duration(i.Interval) * time.Millisecond)
 	for {
 		select {
 		case <-ticker.C:
-			s.update()
+			i.update()
+		case <-i.closeCh:
+			log.Println("close CGroup update process")
+			return
 		default:
+			time.Sleep(time.Duration(i.Interval) * time.Millisecond)
+			// do nothing
 		}
 	}
 }
 
-func NewInspector(config config.Config) *Inspector {
-	// compute the cgroup cpu & memory setting params
+func (i *Inspector) Run() bool {
+	i.closeMu.Lock()
+	defer i.closeMu.Unlock()
+	i.status = false
+	i.closeCh = make(chan interface{})
+	i.UserProcessGroupMap = make(map[int32]*UserProcessGroup)
+	go i.RunInBackground()
+	i.status = true
+	return i.status
+}
+
+func (i *Inspector) Stop() bool {
+	i.closeMu.Lock()
+	defer i.closeMu.Unlock()
+	i.closeCh <- true
+	i.status = false
+	return i.status
+}
+
+func (i *Inspector) GetStatus() bool {
+	return i.status
+}
+
+func (i *Inspector) outOfExcludeUids(uid int32) bool {
+	for _, u := range i.excludeUids {
+		if uid == u {
+			return false
+		}
+	}
+	return true
+}
+
+func NewInspector(interval int, version int, resource *cgroup.Resource, uids []int32) *Inspector {
+	return &Inspector{
+		Interval:    interval,
+		Version:     version,
+		Resource:    resource,
+		excludeUids: uids,
+	}
+}
+
+func NewInspectorFromCfg(conf *config.Config) *Inspector {
+	cfg := conf.CGroup
 	logicCnt, err := cpu.Counts(true)
 	if err != nil {
-		log.Printf("fail to get the number of logic cores.\n")
 		return nil
 	}
-	// cpu_quota = logicCnt * user-cpu-percent / 100 * PERIOD
-	cpuQuota := int64((float64(logicCnt) * config.CGroup.UserCpuPercent / 100) * float64(PERIOD))
+	cpuQuota := (float64(logicCnt) * cfg.UserCpuPercent / 100) * float64(PERIOD)
 	log.Printf("CPU Quota: %v\n", cpuQuota)
 	vm, err := mem.VirtualMemory()
 	if err != nil {
-		log.Printf("fail to get the virtual memory of the system.\n")
-		return nil
+		panic(err)
 	}
-	memLimit := int64(float64(vm.Total) * config.CGroup.UserMemPercent / 100)
-	log.Printf("Memory Limit: %v Total: %v\n", memLimit, vm.Total)
-	disableOOMKiller := config.CGroup.DisableOOMKiller
-	log.Printf("DisableOOMKiller: %v\n", disableOOMKiller)
-	return &Inspector{
-		Interval: config.CGroup.CheckIntervalMs,
-		Users:    make(map[int32]*SysUserInfo),
-		Resource: &specs.LinuxResources{
-			CPU: &specs.LinuxCPU{
-				Quota:  &cpuQuota,
-				Period: &PERIOD,
-			},
-			Memory: &specs.LinuxMemory{
-				Limit:            &memLimit,
-				DisableOOMKiller: &disableOOMKiller,
-			},
+	memLimit := int64(float64(vm.Total) * cfg.UserMemPercent / 100)
+	log.Printf("Memory Limit: %v of total %v\n", memLimit, vm.Total)
+	swapMax := int64(float64(vm.SwapTotal) * cfg.UserSwapPercent / 100)
+	log.Printf("Swap LImit: %v of total %v\n", swapMax, vm.SwapTotal)
+	disableOOMKiller := cfg.DisableOOMKiller
+	log.Printf("Disable OOM Killer: %v", disableOOMKiller)
+	res := &cgroup.Resource{
+		CPU: &cgroup.CPU{
+			Quota:  int64(cpuQuota),
+			Period: PERIOD,
+		},
+		Memory: &cgroup.Memory{
+			Max:              memLimit,
+			SwapMax:          swapMax,
+			DisableOOMKiller: disableOOMKiller,
 		},
 	}
+	version := cgroup.GetCGroupVersion()
+	return NewInspector(cfg.CheckIntervalMs, int(version), res, cfg.ExcludeUids)
 }

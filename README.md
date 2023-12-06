@@ -6,7 +6,7 @@ tool finds application in scenarios like shared HPC cluster login nodes and mult
 
 ## Features
 
-- Support CGroup v1
+- Support CGroup v1 and v2, auto detect
 - Limit the system users' CPU usage 
 - Limit the system users' memory usage
 
@@ -32,8 +32,13 @@ Or manually compile from the source file.
 
 How to enable CGroup v1 in Rocky Linux 9?
 ```bash
-  grubby --update-kernel=/boot/vmlinuz-$(uname -r) --args="systemd.unified_cgroup_hierarchy=0 systemd.legacy_systemd_cgroup_controller"
   grubby --update-kernel=ALL --args="systemd.unified_cgroup_hierarchy=0 systemd.legacy_systemd_cgroup_controller"
+  systemctl reboot
+```
+
+How to enable CGroup V2 in Rocky Linux 9?
+```bash
+  grubby --update-kernel=ALL --args="systemd.unified_cgroup_hierarchy=1"
   systemctl reboot
 ```
 
@@ -50,7 +55,10 @@ cgroup:
   check-interval-ms: 1000 # 1000ms
   user-cpu-percent: 30    # 30% every user can consume the largest CPU percent of all logic cores.
   user-mem-percent: 30    # 30% every user can consume the largest memory percent of all memory.
-  disable-oom-killer: false
+  disable-oom-killer: true
+  exclude-uids:           # which user exclude from restriction
+    - 1240
+    - 1250
 ```
 
 

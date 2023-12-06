@@ -16,12 +16,12 @@ func main() {
 	// load the config from file
 	cfg := config.Viper()
 	// create inspector instance from config
-	spector := inspector.NewInspector(cfg)
+	spector := inspector.NewInspectorFromCfg(&cfg)
 	if spector == nil {
 		fmt.Println("fail to create inspector, exit.")
 		return
 	}
-	go spector.CheckInBackground()
+	spector.Run()
 	// daemon
 	if _, err := daemon.SdNotify(false, "READY=1"); err != nil {
 		log.Printf("notification supported, but failed.")

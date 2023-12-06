@@ -2,25 +2,32 @@
 package inspector
 
 import (
+	"fmt"
+	"github.com/sonmihpc/tokamak/internal/cgroup"
 	"testing"
+	"time"
 )
 
-func TestGetSysUsers(t *testing.T) {
-	//ps := GetSysUsers()
-	//ps.checkInBackground()
-	//ps.update()
-	//for _, i := range ps.Users {
-	//	if i.enable {
-	//		if err := i.UserController.DeleteCGroup(); err != nil {
-	//			fmt.Println(err)
-	//		}
-	//	}
-	//}
-	//for _, p := range ps.Users {
-	//	fmt.Println("+++++++++++++++++++")
-	//	fmt.Printf("UID: %v\n", p.Uid)
-	//	for _, proc := range p.Processes {
-	//		fmt.Printf("%8s: %v\n", proc.Process.String(), proc.Process.Pid)
-	//	}
-	//}
+func TestNewInspector(t *testing.T) {
+	res := &cgroup.Resource{
+		CPU: &cgroup.CPU{
+			Quota:  400000,
+			Period: PERIOD,
+		},
+		Memory: &cgroup.Memory{
+			Max:              5000000,
+			SwapMax:          5000000,
+			DisableOOMKiller: true,
+		},
+	}
+	inspector := NewInspector(1000, 1, res, []int32{})
+	fmt.Println("first running...")
+	inspector.Run()
+	time.Sleep(time.Second * 1000)
+	fmt.Println("stopping...")
+	inspector.Stop()
+	time.Sleep(time.Second * 10)
+	fmt.Println("running again...")
+	inspector.Run()
+	time.Sleep(time.Second * 10)
 }

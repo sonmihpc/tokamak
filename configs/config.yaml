@@ -2,4 +2,8 @@ cgroup:
   check-interval-ms: 1000 # 1000ms
   user-cpu-percent: 30    # 30%
   user-mem-percent: 30    # 30%
+  user-swap-percent: 30   # 30%
   disable-oom-killer: true
+  exclude-uids:
+    - 1240
+    - 1250
