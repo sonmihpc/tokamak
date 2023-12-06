@@ -218,5 +218,6 @@ func NewInspectorFromCfg(conf *config.Config) *Inspector {
 		},
 	}
 	version := cgroup.GetCGroupVersion()
+	log.Printf("CGroup Version: %v", version)
 	return NewInspector(cfg.CheckIntervalMs, int(version), res, cfg.ExcludeUids)
 }
